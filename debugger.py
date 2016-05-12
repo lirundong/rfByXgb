@@ -16,11 +16,12 @@ import pandas as pd
 
 # large data test...
 param = {'silent': 1, 'eval_metric': 'auc', 'nthread': 4, 'eta': 0.2, 'objective': 'binary:logistic', 'max_depth': 6,
-		 'bootstrap': True}
+         'bootstrap': True}
 dataPath = '../mojin/data/PPD-First-Round-Data-Update/Training Set/PPD_Training_Master_GBK_3_1_Training_Set.csv'
-dataRaw = pd.read_csv(dataPath, index_col=u'Idx', parse_dates=[u'ListingInfo'], na_values=['不详', -1, 'NULL', ' '])
-dataLabel = pd.DataFrame(dataRaw.iloc[:,-2], columns=['label'])
-dataDate = dataRaw.iloc[:,-1]
+dataRaw = pd.read_csv(dataPath, index_col=u'Idx', parse_dates=[u'ListingInfo'], na_values=['不详', -1, 'NULL', ' '],
+                      nrows=20)
+dataLabel = pd.DataFrame(dataRaw.iloc[:, -2], columns=['label'])
+dataDate = dataRaw.iloc[:, -1]
 dataCook = dataRaw.drop([u'target', u'ListingInfo'], axis=1)
 testLearner = xgb2rf.Learner(param)
 testLearner.fit(X=dataCook, y=dataLabel)

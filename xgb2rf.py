@@ -15,13 +15,14 @@ PANDAS_DTYPE_MAPPER = {'int8': 'int', 'int16': 'int', 'int32': 'int', 'int64': '
 
 
 # default para dicts for XGBoost.general:
-DEFAULT_XGB_GENERAL_PARA_DIC = {'booster':'gbtree', 'slient':1, 'nthread':1, 'num_pbuffer':None, 'num_feature':None,
-                                'objective':'binary:logistic'}
+DEFAULT_XGB_GENERAL_PARA_DIC = {'booster': 'gbtree', 'slient': 1, 'nthread': 1, 'num_pbuffer': None,
+                                'num_feature': None, 'objective': 'binary:logistic'}
 
 # default para dicts for XGBoost.treeBooster:
-DEFAULT_XGB_TREE_BOOSTER_PARA_DIC = {'eta':0.3, 'gamma':0, 'max_depth':6, 'min_child_weight':1,'max_delta_step':0,
-                                    'subsample':1, 'colsample_bytree':1, 'colsample_bylevel':1, 'lambda':1, 'alpha':0,
-                                    'tree_method':'auto','sketch_eps':0.03}
+DEFAULT_XGB_TREE_BOOSTER_PARA_DIC = {'eta': 0.3, 'gamma': 0, 'max_depth': 6, 'min_child_weight': 1,
+                                     'max_delta_step': 0, 'subsample': 1, 'colsample_bytree': 1,
+                                     'colsample_bylevel': 1, 'lambda': 1, 'alpha': 0, 'tree_method': 'auto',
+                                     'sketch_eps': 0.03}
 
 # default para dicts for randomForest:
 DEFAULT_RF_PARA_DIC = {'n_estimators': 10, 'criterion': 'gini', 'max_depth': None,
@@ -83,6 +84,8 @@ def findCateFeat(seriesIn, cateFeatList, cateColList, cateColSure=False):
         # else:
             cateFeatList.extend({}.fromkeys(seriesIn.values).keys())
 
+def oneHotEncode(rowIn, cateFeatList):
+    return cateFeatList.apply(lambda x: x in rowIn.values)
 
 class Learner:
     def __init__(self, paraDic, xgbParaDic=None):
@@ -264,49 +267,33 @@ class Learner:
         if len(X) != len(y):
             raise ValueError('train feature and label must get same length!')
 
-        if type(X) != pd.core.frame.DataFrame:
+        if type(X) != pd.DataFrame:
             raise TypeError('train feature X must be a pandas.DataFrame!')
         else:
             trainFeature = X
         numTrainIns = len(X.index)
 
-        if type(y) != pd.core.frame.DataFrame:
-            self.trainLabel = pd.DataFrame(y, columns=['label'], index = X.index)
+        if type(y) != pd.DataFrame:
+            self.trainLabel = pd.DataFrame(y, columns=['label'], index=X.index)
         else:
             self.trainLabel = y
 
         # if categorical, encode to one-hot code
         # note threshold rate parameter: oneHotThre
-        trainFeatureCate = pd.DataFrame()
-
-        # for column in trainFeature.columns:
-        #     if trainFeature[column].dtype.name not in PANDAS_DTYPE_MAPPER:
-        #         self.cateFeatColList.append(column)
-        #         for featName in list(set(trainFeature[column])):
-        #             if ((float(sum(trainFeature.ix[:,column] == featName)) / float(numTrainIns)) >= self.paraDic.get('oneHotThre'))\
-        #                     and (featName not in self.cateFeatList):
-        #                 # de-noise: if (currentCateFeature.num() / allInstance.num() < oneHotThre)
-        #                 # then we think this categorical candidate is noise and ignore it;
-        #                 self.cateFeatList.append(featName)
-        #                 print 'get new categorical feat: %s' % featName
         trainFeature.apply(findCateFeat, args=(self.cateFeatColList, self.cateFeatList))
 
         self.numFeatColList = trainFeature.columns.difference(self.cateFeatColList)
-        trainFeatureNum = trainFeature.ix[:,self.numFeatColList]
-        # testFeatureNum = testFeature.ix[:,self.numFeatColList]
+        trainFeatureNum = trainFeature.ix[:, self.numFeatColList]
 
         # one-Hot code column name:
         self.oneHotCol = ['oneHot_'+str(num) for num in range(len(self.cateFeatList))]
 
         # dealing with train categorical features:
-        currentNum = 1
-        for idx in trainFeature.index:
-            currentCateList = list(trainFeature.ix[idx, self.cateFeatColList])
-            currentOneHot = [cateFeat in currentCateList for cateFeat in self.cateFeatList]
-            trainFeatureCate = trainFeatureCate.append(pd.DataFrame(currentOneHot, columns=[idx],
-                                                                    index=self.oneHotCol).T)
-            print 'One-hot coding... (%d/%d)' % (currentNum, len(trainFeature))
-            currentNum += 1
+        cateFeatSer = pd.Series(self.cateFeatList, index=self.oneHotCol)
+        # apply one-hot encode function to each row in trainFeature[self.cateFeatColList]
+        # trainFeatureCate = pd.DataFrame(columns=self.oneHotCol)
+        trainFeatureCate = trainFeature[self.cateFeatColList].apply(oneHotEncode, args=(cateFeatSer), axis=1)
+        # concat two DataFrame by same index
         self.trainFeat = pd.concat([trainFeatureNum, trainFeatureCate], axis=1)
 
         # let's learn via XGBoost
