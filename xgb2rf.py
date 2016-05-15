@@ -4,8 +4,8 @@
 import xgboost as xgb
 import pandas as pd
 import numpy as np
-from numpy.random import uniform
-from numpy import floor, ceil
+# from numpy.random import uniform
+from numpy import ceil  # , floor
 
 # default para dicts for pandas.DataFrame to XGBoost.DMatrix:
 PANDAS_DTYPE_MAPPER = {'int8': 'int', 'int16': 'int', 'int32': 'int', 'int64': 'int',
@@ -26,20 +26,20 @@ DEFAULT_XGB_TREE_BOOSTER_PARA_DIC = {'eta': 0.3, 'gamma': 0, 'max_depth': 6, 'mi
 
 # default para dicts for randomForest:
 DEFAULT_RF_PARA_DIC = {'n_estimators': 10, 'criterion': 'gini', 'max_depth': None,
-                    'min_samples_split': 2, 'min_samples_leaf': 1, 'min_weight_fraction_leaf': 0.0,
-                    'max_features': 'auto', 'max_leaf_nodes': None, 'bootstrap': True, 'oob_score': False,
-                    'n_jobs': 1, 'random_state': None, 'verbose': 0, 'warm_start': False, 'class_weight': None}
+                       'min_samples_split': 2, 'min_samples_leaf': 1, 'min_weight_fraction_leaf': 0.0,
+                       'max_features': 'auto', 'max_leaf_nodes': None, 'bootstrap': True, 'oob_score': False,
+                       'n_jobs': 1, 'random_state': None, 'verbose': 0, 'warm_start': False, 'class_weight': None}
 
 # default para dicts for XGBoost.boost.train:
-DEFAULT_XGB_TRAIN_PARA_DIC = {'params': None, 'dtrain': None, 'num_boost_round': 10, 'evals': None,
+DEFAULT_XGB_TRAIN_PARA_DIC = {'num_boost_round': 10, 'evals': None,  # 'params': None, 'dtrain': None,
                               'obj': None, 'feval': None, 'maximize': False, 'early_stopping_rounds': None,
                               'evals_result': None, 'verbose_eval': True, 'learning_rates': None, 'xgb_model': None}
 
 # parameter map from RandomForestClassifier to XGBoost:
-RF_TO_XGB_PARA_DIC = {'n_estimators': 'num_boost_round', 'criterion': None, 'max_features':'num_feature',
-                      'max_depth':'max_depth', 'min_samples_split':None, 'min_samples_leaf':None,
-                      'min_weight_fraction_leaf':None,'max_leaf_nodes':None, 'bootstrap':None, 'oob_score':None,
-                      'n_jobs':'nthread', 'random_state':None,'verbose':None, 'warm_start':None, 'class_weight':None}
+RF_TO_XGB_PARA_DIC = {'n_estimators': 'num_boost_round', 'criterion': None, 'max_features': 'num_feature',
+                      'max_depth': 'max_depth', 'min_samples_split': None, 'min_samples_leaf': None, 'oob_score': None,
+                      'min_weight_fraction_leaf': None, 'max_leaf_nodes': None, 'bootstrap': None, 'class_weight': None,
+                      'n_jobs': 'nthread', 'random_state': None, 'verbose': None, 'warm_start': None}
 
 # parameters can be constructed:
 CAN_CON_PARA = ['bootstrap']
@@ -52,47 +52,51 @@ CAN_CON_PARA = ['bootstrap']
 #              then we think this categorical candidate is noise and ignore it;
 #  bootStrapRounds: [int, default = 10]
 #
-NEW_PARA_DIC = {'oneHotThre':0.005, 'bootStrapRounds':10, 'bootStrapRato':0.1, 'bootStrapEqu':True}
+NEW_PARA_DIC = {'oneHotThre': 0.005, 'bootStrapRounds': 10, 'bootStrapRato': 0.1, 'bootStrapEqu': True}
 
 
 # Functions for further using -- WAITING FIX
-def findCateFeat(seriesIn, cateFeatList, cateColList, cateColSure=False):
+def find_cate_feat(series_in, cate_feat_list, cate_col_list, one_hot_thre=0.005, cate_col_sure=False):
     """
         Function to enumerate all categorical feature candidates in a
     pandas.DataFrame into a list for further One-Hot encode.
     ==========
-    :param seriesIn: Type: pandas.DataFrame
+    :param series_in: Type: pandas.DataFrame
             The DataFrame you're dealing with.
             It should contains as least one column which made up
         with CATEGORICAL candidates(not int, float or bool).
 
-    :param cateFeatList: Type: list
+    :param cate_feat_list: Type: list
+
+    :param cate_col_list:
+
+    :param cate_col_sure:
 
     :return: NULL
     """
-    if not cateColSure:
+    if not cate_col_sure:
         # don't know which columns is categorical, judge by *.dtype.name
-        if seriesIn.dtype.name not in PANDAS_DTYPE_MAPPER.keys():
-            cateFeatList.extend({}.fromkeys(seriesIn.values).keys())
-            if seriesIn.name not in cateColList:
-                cateColList.append(seriesIn.name)
+        if series_in.dtype.name not in PANDAS_DTYPE_MAPPER.keys():
+            cate_feat_list.extend({}.fromkeys(series_in.values).keys())
+            if series_in.name not in cate_col_list:
+                cate_col_list.append(series_in.name)
     else:
-        if len(cateColList) == 0:
-            raise ValueError('If categorical column is sure, param "cateColList" can not be empty.')
-        elif (seriesIn.dtype.name not in PANDAS_DTYPE_MAPPER) and (seriesIn.dtype.name in cateColList):
-            # return
-        # else:
-            cateFeatList.extend({}.fromkeys(seriesIn.values).keys())
+        if len(cate_col_list) == 0:
+            raise ValueError('If categorical column is sure, param "cate_col_list" can not be empty.')
+        elif (series_in.dtype.name not in PANDAS_DTYPE_MAPPER) and (series_in.dtype.name in cate_col_list):
+            cate_feat_list.extend({}.fromkeys(series_in.values).keys())
 
-def oneHotEncode(rowIn, cateFeatList):
-    return cateFeatList.apply(lambda x: x in rowIn.values)
+
+def one_hot_encode(row_in, cate_feat_list):
+    return cate_feat_list.apply(lambda x: x in row_in.values)
+
 
 class Learner:
-    def __init__(self, paraDic, xgbParaDic=None):
+    def __init__(self, para_dict, xgb_para_dict=None):
         """
         Init the Learner class.
 
-        :param paraDic: dict of parameters
+        :param para_dict: dict of parameters
         Parameters
         complete same as sklearn.ensemble.RandomForestClassifier
     ----------
@@ -176,36 +180,36 @@ class Learner:
         """
 
         # PARAMETERS
-        self.paraDic = NEW_PARA_DIC.copy()
+        self.para_dict = NEW_PARA_DIC.copy()
         self.xgbSetPara = DEFAULT_XGB_TRAIN_PARA_DIC.copy()
         self.xgbTrainPara = DEFAULT_XGB_GENERAL_PARA_DIC.copy()
         for keys in DEFAULT_XGB_TREE_BOOSTER_PARA_DIC.keys():
-            self.xgbTrainPara.update({'bst:'+keys : DEFAULT_XGB_TREE_BOOSTER_PARA_DIC.get(keys)})
+            self.xgbTrainPara.update({'bst:'+keys: DEFAULT_XGB_TREE_BOOSTER_PARA_DIC.get(keys)})
 
         self.paraNotInXGB = {}
-        for currentKey in paraDic.keys():
+        for currentKey in para_dict.keys():
             if RF_TO_XGB_PARA_DIC.get(currentKey) is not None:
                 if RF_TO_XGB_PARA_DIC.get(currentKey) in self.xgbSetPara.keys():
                     # current feature is XGBoost set para
-                    self.xgbSetPara[RF_TO_XGB_PARA_DIC.get(currentKey)] = paraDic[currentKey]
+                    self.xgbSetPara[RF_TO_XGB_PARA_DIC.get(currentKey)] = para_dict[currentKey]
                 elif RF_TO_XGB_PARA_DIC.get(currentKey) in self.xgbTrainPara.keys():
                     # current feature is general train feature
-                    self.xgbTrainPara[RF_TO_XGB_PARA_DIC.get(currentKey)] = paraDic[currentKey]
+                    self.xgbTrainPara[RF_TO_XGB_PARA_DIC.get(currentKey)] = para_dict[currentKey]
                 else:
                     # current feature is boost feature
-                    self.xgbTrainPara['bst:'+RF_TO_XGB_PARA_DIC.get(currentKey)] = paraDic[currentKey]
+                    self.xgbTrainPara['bst:'+RF_TO_XGB_PARA_DIC.get(currentKey)] = para_dict[currentKey]
             elif currentKey in CAN_CON_PARA or NEW_PARA_DIC:
-                self.paraDic.update({currentKey: paraDic[currentKey]})
+                self.para_dict.update({currentKey: para_dict[currentKey]})
             else:
                 # this feature should be constructed manually
-                self.paraNotInXGB[currentKey] = paraDic[currentKey]
+                self.paraNotInXGB[currentKey] = para_dict[currentKey]
         for keys in self.paraNotInXGB.keys():
             print "WARNING: parameter %s can't constructed.\n" % keys
 
         # store XGBoost parameters:
-        # self.xgbTrainPara.update(xgbParaDic)
-        if xgbParaDic is not None:
-            for item in xgbParaDic.items():
+        # self.xgbTrainPara.update(xgb_para_dict)
+        if xgb_para_dict is not None:
+            for item in xgb_para_dict.items():
                 if item[0] in self.xgbSetPara.keys():
                     # current feature is XGBoost set para
                     self.xgbSetPara[item[0]] = item[1]
@@ -236,31 +240,31 @@ class Learner:
 
         self.bsBoosterList = []  # store Boosters of fit result
 
-    def resetPara(self, newParaDic):
+    def reset_para(self, new_para_dict):
         """
         reset parameter via a new parameter dict
 
-        :param newParaDic: a new parameter dict
+        :param new_para_dict: a new parameter dict
         :return: None
         """
-        for currentKey in newParaDic.keys():
-            # self.paraDic[currentKey] = newParaDic.get(currentKey)
+        for currentKey in new_para_dict.keys():
+            # self.paraDic[currentKey] = new_para_dict.get(currentKey)
             if currentKey in self.paraDic.keys():
-                self.paraDic[currentKey] = newParaDic.get(currentKey)
+                self.paraDic[currentKey] = new_para_dict.get(currentKey)
             else:
                 print 'Invalid parameter when reset Parameters: %s' % currentKey
                 exit(-1)
 
     def fit(self, X, y):
         """
-        fit X = [labels, features] to Y = [features]
+        fit X = [labels, features] to y = [features]
 
-        :param X: 2-dim Pandas.DataFrame
+        :param X: 2-dim pandas.DataFrame
             [itemNum * (1 + featureNum)]: [labels, features]
             feature can be int, float, bool or categorical info
-        :param Y: 2-dim Pandas.DataFrame
+        :param y: pandas.Series
             [itemNum * featureNum]: [features]
-        :return: non
+        :return: NULL
         """
 
         # DATA PRE-PROCESS:
@@ -270,31 +274,33 @@ class Learner:
         if type(X) != pd.DataFrame:
             raise TypeError('train feature X must be a pandas.DataFrame!')
         else:
-            trainFeature = X
-        numTrainIns = len(X.index)
+            train_feature = X
+        num_train_ins = len(X.index)
 
-        if type(y) != pd.DataFrame:
-            self.trainLabel = pd.DataFrame(y, columns=['label'], index=X.index)
+        if type(y) != pd.Series:
+            self.trainLabel = pd.Series(y, index=X.index, name='label')
         else:
             self.trainLabel = y
+            if self.trainLabel.name != 'label':
+                self.trainLabel.name = 'label'
 
         # if categorical, encode to one-hot code
         # note threshold rate parameter: oneHotThre
-        trainFeature.apply(findCateFeat, args=(self.cateFeatColList, self.cateFeatList))
+        train_feature.apply(find_cate_feat, args=(self.cateFeatColList, self.cateFeatList))
 
-        self.numFeatColList = trainFeature.columns.difference(self.cateFeatColList)
-        trainFeatureNum = trainFeature.ix[:, self.numFeatColList]
+        self.numFeatColList = train_feature.columns.difference(self.cateFeatColList)
+        train_feature_num = train_feature.ix[:, self.numFeatColList]
 
         # one-Hot code column name:
         self.oneHotCol = ['oneHot_'+str(num) for num in range(len(self.cateFeatList))]
 
         # dealing with train categorical features:
-        cateFeatSer = pd.Series(self.cateFeatList, index=self.oneHotCol)
-        # apply one-hot encode function to each row in trainFeature[self.cateFeatColList]
-        # trainFeatureCate = pd.DataFrame(columns=self.oneHotCol)
-        trainFeatureCate = trainFeature[self.cateFeatColList].apply(oneHotEncode, args=(cateFeatSer), axis=1)
+        cate_feat_ser = pd.Series(self.cateFeatList, index=self.oneHotCol)
+        # apply one-hot encode function to each row in train_feature[self.cateFeatColList]
+        # train_feature_cate = pd.DataFrame(columns=self.oneHotCol)
+        train_feature_cate = train_feature[self.cateFeatColList].apply(one_hot_encode, args=(cate_feat_ser, ), axis=1)
         # concat two DataFrame by same index
-        self.trainFeat = pd.concat([trainFeatureNum, trainFeatureCate], axis=1)
+        self.trainFeat = pd.concat([train_feature_num, train_feature_cate], axis=1)
 
         # let's learn via XGBoost
         if self.paraDic.get('bootstrap'):
@@ -302,38 +308,50 @@ class Learner:
             # seed()
             for bsRound in range(self.paraDic.get('bootStrapRounds')):
                 # boot strap for bootStrapRounds rounds
+                sample_num = ceil(float(num_train_ins) * self.paraDic.get('bootStrapRato'))
                 if self.paraDic.get('bootStrapEqu'):
-                    # negInstans.num() = posInstance.num()
-                    postiveIdx = self.trainLabel[self.trainLabel['label'] == 1].index
-                    negativeIdx = self.trainLabel.index.difference(postiveIdx)
-                    currentPosIdx = postiveIdx[
-                        floor(uniform(size=(1, ceil(len(postiveIdx) * self.paraDic.get('bootStrapRato')))) * len(postiveIdx)).astype(int).tolist()]
-                    currentNegIdx = negativeIdx[
-                        floor(uniform(size=(1, ceil(len(negativeIdx) * self.paraDic.get('bootStrapRato')))) * len(negativeIdx)).astype(int).tolist()]
-                    posInstance = self.trainFeat.ix[currentPosIdx, :]
-                    negInstance = self.trainFeat.ix[currentNegIdx, :]
+                    # positive and negative instance should get same weight when sampling
+                    pos_idx = self.trainLabel[self.trainLabel['label'] == 1].index
+                    neg_idx = self.trainLabel.index.difference(pos_idx)
+                    sample_weight = pd.Series(index=X.index)
+                    sample_weight[pos_idx] = 0.5 / float(len(pos_idx))
+                    sample_weight[neg_idx] = 0.5 / float(len(neg_idx))
+
+                    # currentPosIdx = pos_idx[
+                    #     floor(uniform(size=(1, ceil(len(pos_idx) * self.paraDic.get('bootStrapRato')))) * len(pos_idx)).astype(int).tolist()]
+                    # currentNegIdx = neg_idx[
+                    #     floor(uniform(size=(1, ceil(len(neg_idx) * self.paraDic.get('bootStrapRato')))) * len(neg_idx)).astype(int).tolist()]
+                    # posInstance = self.trainFeat.ix[currentPosIdx, :]
+                    # negInstance = self.trainFeat.ix[currentNegIdx, :]
                     # store into XGBoost
-                    currentTrainDF = posInstance.append(negInstance)
-                    currentTrainLabel = [True] * len(currentPosIdx) + [False] * len(currentNegIdx)
+                    # current_df = posInstance.append(negInstance)
+                    # current_label = [True] * len(currentPosIdx) + [False] * len(currentNegIdx)
+
+                    current_df = train_feature.sample(n=sample_num, weights=sample_weight, replace=True)
+                    current_label = self.trainLabel[current_df.index]
+
                 else:
                     # don't care if pos instance equal to neg instance
-                    sampleTrainNum = ceil(float(numTrainIns) * self.paraDic.get('bootStrapRato'))
-                    sampleTrainIdx = self.trainFeat.index[floor(uniform(size=(1, sampleTrainNum)) * numTrainIns).astype(int).tolist()]
-                    currentTrainDF = self.trainFeat.ix[sampleTrainIdx]
-                    currentTrainLabel = self.trainLabel.ix[sampleTrainIdx]
+                    # sampleTrainNum = ceil(float(num_train_ins) * self.paraDic.get('bootStrapRato'))
+                    # sampleTrainIdx = self.trainFeat.index[floor(uniform(size=(1, sampleTrainNum)) * num_train_ins).astype(int).tolist()]
+                    # current_df = self.trainFeat.ix[sampleTrainIdx]
+                    # current_label = self.trainLabel.ix[sampleTrainIdx]
+
+                    current_df = train_feature.sample(n=sample_num, replace=True)
+                    current_label = self.trainLabel[current_df.index]
+                    
                 # learn and dump a Booster per round
-                currentTrainDM = xgb.DMatrix(currentTrainDF, label=currentTrainLabel)
-                currentBooster = xgb.train(self.xgbTrainPara, currentTrainDM, **self.xgbSetPara)
-                print 'Training:\tbootStrap Round #\t%d\n' % bsRound
-                self.bsBoosterList.append(currentBooster)
+                current_train_dm = xgb.DMatrix(current_df, label=current_label)
+                current_booster = xgb.train(params=self.xgbTrainPara, dtrain=current_train_dm, **self.xgbSetPara)
+                print 'Training:\t bootStrap Round #\t%d\n' % bsRound
+                self.bsBoosterList.append(current_booster)
         else:
             # don't bootstrap
-            # load trainFeature to xgboost
-            trainDMat = xgb.DMatrix(self.trainFeat, label=self.trainLabel)
-            # self.testDMat = xgb.DMatrix(self.testFeat)
-            currentBooster = xgb.train(self.xgbTrainPara, trainDMat, **self.xgbSetPara)
+            # load train_feature to XGBoost.DMatrix
+            train_dmat = xgb.DMatrix(self.trainFeat, label=self.trainLabel)
+            current_booster = xgb.train(params=self.xgbTrainPara, dtrain=train_dmat, **self.xgbSetPara)
             print 'NO BOOTSTRAP:\ttrain finished.\n'
-            self.bsBoosterList.append(currentBooster)
+            self.bsBoosterList.append(current_booster)
 
     def predict(self, X):
         # one-hot coding
