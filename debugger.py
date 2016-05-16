@@ -15,13 +15,24 @@ import pandas as pd
 # print prediction1
 
 # large data test...
-param = {'silent': 1, 'eval_metric': 'auc', 'nthread': 4, 'eta': 0.2, 'objective': 'binary:logistic', 'max_depth': 6,
-         'bootstrap': True}
+param = {'silent': 1, 'eval_metric': 'auc', 'nthread': 4, 'eta': 0.2, 'objective': 'binary:logistic', 'max_depth': 5,
+         'bootstrap': True, 'n_estimators': 6, 'bootStrapRounds': 3}
 dataPath = '../mojin/data/PPD-First-Round-Data-Update/Training Set/PPD_Training_Master_GBK_3_1_Training_Set.csv'
 dataRaw = pd.read_csv(dataPath, index_col=u'Idx', parse_dates=[u'ListingInfo'], na_values=['不详', -1, 'NULL', ' '],
-                      nrows=20)
-dataLabel = pd.DataFrame(dataRaw.iloc[:, -2], columns=['label'])
+                      nrows=1000)
+dataLabel = dataRaw.iloc[:, -2]
 dataDate = dataRaw.iloc[:, -1]
-dataCook = dataRaw.drop([u'target', u'ListingInfo'], axis=1)
+
+dataCook = dataRaw.drop([u'target', u'ListingInfo'], axis=1).sample(n=700)
+dataTest = dataRaw.drop([u'target', u'ListingInfo'], axis=1).sample(n=300)
+
+trainLabel = dataLabel[dataCook.index]
+trueLabel = dataLabel[dataTest.index]
+
 testLearner = xgb2rf.Learner(param)
-testLearner.fit(X=dataCook, y=dataLabel)
+testLearner.fit(X=dataCook, y=trainLabel)
+predictRate = testLearner.predict(dataTest)
+
+predictLabel = predictRate.apply(lambda x: 1 if x >= 0.5 else 0)
+correctRate = float(sum(predictLabel == trueLabel)) / float(len(trueLabel))
+print 'correct rate: %f' % correctRate

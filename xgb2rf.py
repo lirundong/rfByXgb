@@ -3,9 +3,7 @@
 
 import xgboost as xgb
 import pandas as pd
-import numpy as np
-# from numpy.random import uniform
-from numpy import ceil  # , floor
+from numpy import ceil
 
 # default para dicts for pandas.DataFrame to XGBoost.DMatrix:
 PANDAS_DTYPE_MAPPER = {'int8': 'int', 'int16': 'int', 'int32': 'int', 'int64': 'int',
@@ -45,23 +43,17 @@ RF_TO_XGB_PARA_DIC = {'n_estimators': 'num_boost_round', 'criterion': None, 'max
 CAN_CON_PARA = ['bootstrap']
 
 # new parameters:
-# -----
-#  oneHotThre: [float, default = 0.005]
-#              threshould when encode categorical feature to one-hot code
-#              if (currentCateFeature.num() / allInstance.num() < oneHotThre)
-#              then we think this categorical candidate is noise and ignore it;
-#  bootStrapRounds: [int, default = 10]
-#
 NEW_PARA_DIC = {'oneHotThre': 0.005, 'bootStrapRounds': 10, 'bootStrapRato': 0.1, 'bootStrapEqu': True}
 
 
 # Functions for further using -- WAITING FIX
-def find_cate_feat(series_in, cate_feat_list, cate_col_list, one_hot_thre=0.005, cate_col_sure=False):
+def find_cate_feat(column_in, cate_feat_list, cate_col_list, one_hot_thre=0.005):
     """
         Function to enumerate all categorical feature candidates in a
     pandas.DataFrame into a list for further One-Hot encode.
+        Note threshold rate parameter: oneHotThre
     ==========
-    :param series_in: Type: pandas.DataFrame
+    :param column_in: Type: pandas.DataFrame
             The DataFrame you're dealing with.
             It should contains as least one column which made up
         with CATEGORICAL candidates(not int, float or bool).
@@ -70,25 +62,20 @@ def find_cate_feat(series_in, cate_feat_list, cate_col_list, one_hot_thre=0.005,
 
     :param cate_col_list:
 
-    :param cate_col_sure:
+    :param one_hot_thre:
 
     :return: NULL
     """
-    if not cate_col_sure:
-        # don't know which columns is categorical, judge by *.dtype.name
-        if series_in.dtype.name not in PANDAS_DTYPE_MAPPER.keys():
-            cate_feat_list.extend({}.fromkeys(series_in.values).keys())
-            if series_in.name not in cate_col_list:
-                cate_col_list.append(series_in.name)
-    else:
-        if len(cate_col_list) == 0:
-            raise ValueError('If categorical column is sure, param "cate_col_list" can not be empty.')
-        elif (series_in.dtype.name not in PANDAS_DTYPE_MAPPER) and (series_in.dtype.name in cate_col_list):
-            cate_feat_list.extend({}.fromkeys(series_in.values).keys())
+    if len(cate_col_list) == 0:
+        raise ValueError('If categorical column is sure, param "cate_col_list" can not be empty.')
+    elif (column_in.dtype.name not in PANDAS_DTYPE_MAPPER) and (column_in.name in cate_col_list):
+        count_info = column_in.value_counts()
+        count_min = len(column_in) * one_hot_thre
+        cate_feat_list += list(count_info[count_info >= count_min].index)
 
 
-def one_hot_encode(row_in, cate_feat_list):
-    return cate_feat_list.apply(lambda x: x in row_in.values)
+def one_hot_encode(row_in, cate_feat_ser):
+    return cate_feat_ser.apply(lambda x: x in row_in)
 
 
 class Learner:
@@ -232,6 +219,7 @@ class Learner:
         # TRAIN AND TEST DATA STORAGE
         self.trainLabel = pd.DataFrame()
         self.trainFeat = pd.DataFrame()
+        self.finalPrediction = pd.Series()
 
         self.cateFeatColList = []  # columns which is categorical
         self.cateFeatList = []  # candidates of categorical feats
@@ -274,7 +262,7 @@ class Learner:
         if type(X) != pd.DataFrame:
             raise TypeError('train feature X must be a pandas.DataFrame!')
         else:
-            train_feature = X
+            train_feature = X.applymap(lambda x: x.strip() if (type(x) == str) else x)
         num_train_ins = len(X.index)
 
         if type(y) != pd.Series:
@@ -285,95 +273,85 @@ class Learner:
                 self.trainLabel.name = 'label'
 
         # if categorical, encode to one-hot code
-        # note threshold rate parameter: oneHotThre
-        train_feature.apply(find_cate_feat, args=(self.cateFeatColList, self.cateFeatList))
+        self.cateFeatColList = [train_feature.columns[i] for i, dtype in
+                                enumerate(train_feature.dtypes) if dtype.name not in PANDAS_DTYPE_MAPPER]
+        train_feature.apply(find_cate_feat, axis=0,
+                            args=(self.cateFeatList, self.cateFeatColList, self.para_dict.get('oneHotThre')))
 
-        self.numFeatColList = train_feature.columns.difference(self.cateFeatColList)
-        train_feature_num = train_feature.ix[:, self.numFeatColList]
+        self.numFeatColList = train_feature.columns.difference(self.cateFeatColList).tolist()
+        train_feature_num = train_feature[self.numFeatColList]
 
         # one-Hot code column name:
         self.oneHotCol = ['oneHot_'+str(num) for num in range(len(self.cateFeatList))]
 
         # dealing with train categorical features:
         cate_feat_ser = pd.Series(self.cateFeatList, index=self.oneHotCol)
-        # apply one-hot encode function to each row in train_feature[self.cateFeatColList]
-        # train_feature_cate = pd.DataFrame(columns=self.oneHotCol)
         train_feature_cate = train_feature[self.cateFeatColList].apply(one_hot_encode, args=(cate_feat_ser, ), axis=1)
+
         # concat two DataFrame by same index
         self.trainFeat = pd.concat([train_feature_num, train_feature_cate], axis=1)
 
         # let's learn via XGBoost
-        if self.paraDic.get('bootstrap'):
+        if self.para_dict.get('bootstrap'):
             # use bootstrap to sample
             # seed()
-            for bsRound in range(self.paraDic.get('bootStrapRounds')):
+            for bsRound in range(self.para_dict.get('bootStrapRounds')):
                 # boot strap for bootStrapRounds rounds
-                sample_num = ceil(float(num_train_ins) * self.paraDic.get('bootStrapRato'))
-                if self.paraDic.get('bootStrapEqu'):
+                sample_num = ceil(float(num_train_ins) * self.para_dict.get('bootStrapRato'))
+                if self.para_dict.get('bootStrapEqu'):
                     # positive and negative instance should get same weight when sampling
-                    pos_idx = self.trainLabel[self.trainLabel['label'] == 1].index
+                    pos_idx = self.trainLabel[self.trainLabel == 1].index
                     neg_idx = self.trainLabel.index.difference(pos_idx)
                     sample_weight = pd.Series(index=X.index)
                     sample_weight[pos_idx] = 0.5 / float(len(pos_idx))
                     sample_weight[neg_idx] = 0.5 / float(len(neg_idx))
-
-                    # currentPosIdx = pos_idx[
-                    #     floor(uniform(size=(1, ceil(len(pos_idx) * self.paraDic.get('bootStrapRato')))) * len(pos_idx)).astype(int).tolist()]
-                    # currentNegIdx = neg_idx[
-                    #     floor(uniform(size=(1, ceil(len(neg_idx) * self.paraDic.get('bootStrapRato')))) * len(neg_idx)).astype(int).tolist()]
-                    # posInstance = self.trainFeat.ix[currentPosIdx, :]
-                    # negInstance = self.trainFeat.ix[currentNegIdx, :]
-                    # store into XGBoost
-                    # current_df = posInstance.append(negInstance)
-                    # current_label = [True] * len(currentPosIdx) + [False] * len(currentNegIdx)
-
-                    current_df = train_feature.sample(n=sample_num, weights=sample_weight, replace=True)
+                    # sample with replacement
+                    current_df = self.trainFeat.sample(n=sample_num, weights=sample_weight, replace=True)
                     current_label = self.trainLabel[current_df.index]
 
                 else:
                     # don't care if pos instance equal to neg instance
-                    # sampleTrainNum = ceil(float(num_train_ins) * self.paraDic.get('bootStrapRato'))
-                    # sampleTrainIdx = self.trainFeat.index[floor(uniform(size=(1, sampleTrainNum)) * num_train_ins).astype(int).tolist()]
-                    # current_df = self.trainFeat.ix[sampleTrainIdx]
-                    # current_label = self.trainLabel.ix[sampleTrainIdx]
-
-                    current_df = train_feature.sample(n=sample_num, replace=True)
+                    current_df = self.trainFeat.sample(n=sample_num, replace=True)
                     current_label = self.trainLabel[current_df.index]
                     
                 # learn and dump a Booster per round
                 current_train_dm = xgb.DMatrix(current_df, label=current_label)
-                current_booster = xgb.train(params=self.xgbTrainPara, dtrain=current_train_dm, **self.xgbSetPara)
+                self.xgbSetPara.update({'params': self.xgbTrainPara, 'dtrain': current_train_dm})
+                current_booster = xgb.train(**self.xgbSetPara)
                 print 'Training:\t bootStrap Round #\t%d\n' % bsRound
                 self.bsBoosterList.append(current_booster)
         else:
             # don't bootstrap
             # load train_feature to XGBoost.DMatrix
             train_dmat = xgb.DMatrix(self.trainFeat, label=self.trainLabel)
-            current_booster = xgb.train(params=self.xgbTrainPara, dtrain=train_dmat, **self.xgbSetPara)
-            print 'NO BOOTSTRAP:\ttrain finished.\n'
+            self.xgbSetPara.update({'params': self.xgbTrainPara, 'dtrain': train_dmat})
+            current_booster = xgb.train(**self.xgbSetPara)
+            print 'NO BOOTSTRAP:\t training finished.\n'
             self.bsBoosterList.append(current_booster)
 
     def predict(self, X):
-        # one-hot coding
-        predictFeature = X
-        predictFeatureCate = pd.DataFrame()
-        for idx in predictFeature.index:
-            currentCateList = list(predictFeature.ix[idx, self.cateFeatColList])
-            currentOneHot = [cateFeat in currentCateList for cateFeat in self.cateFeatList]
-            predictFeatureCate = predictFeatureCate.append(pd.DataFrame(currentOneHot, columns=[idx],
-                                                                    index=self.oneHotCol).T)
-        predictFeatureNum = predictFeature.ix[:, self.numFeatColList]
-        predictFeat = pd.concat([predictFeatureNum, predictFeatureCate], axis=1)
-        predictDM = xgb.DMatrix(predictFeat)
-        self.finalPrediction = np.zeros((1,len(X)))
-        if self.paraDic.get('bootstrap'):
-            # oops, we should predict multipal times
-            weightPerBoost = 1.0 / float(len(self.bsBoosterList))
-            for booster in self.bsBoosterList:
-                currentPrediction = booster.predict(predictDM)
-                # print currentPrediction
-                self.finalPrediction += currentPrediction * weightPerBoost
+        if type(X) != pd.DataFrame:
+            raise TypeError('train feature X must be a pandas.DataFrame!')
         else:
-            self.finalPrediction = self.bsBoosterList[0].predict(predictDM)
-        print self.finalPrediction
-        return pd.DataFrame(self.finalPrediction.T, index=X.index)
+            predict_feature = X.applymap(lambda x: x.strip() if (type(x) == str) else x)
+
+        # one-hot coding
+        cate_feat_ser = pd.Series(self.cateFeatList, index=self.oneHotCol)
+        predict_feature_cate = predict_feature[self.cateFeatColList].apply(one_hot_encode, args=(cate_feat_ser,), axis=1)
+        predict_feature_num = predict_feature[self.numFeatColList]
+        predict_feature = pd.concat([predict_feature_num, predict_feature_cate], axis=1)
+        predict_dm = xgb.DMatrix(predict_feature)
+
+        if self.para_dict.get('bootstrap'):
+            # oops, we should predict multiple times
+            weight_per_boost = 1.0 / float(len(self.bsBoosterList))
+            for booster in self.bsBoosterList:
+                current_prediction = booster.predict(predict_dm)
+                # print currentPrediction
+                if len(self.finalPrediction) == 0:
+                    self.finalPrediction = current_prediction * weight_per_boost
+                else:
+                    self.finalPrediction += current_prediction * weight_per_boost
+        else:
+            self.finalPrediction = self.bsBoosterList[0].predict(predict_dm)
+        return pd.Series(self.finalPrediction, index=X.index)
